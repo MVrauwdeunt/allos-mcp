@@ -3,6 +3,7 @@
 
 import asyncio
 import json
+from importlib.metadata import version
 import os
 import sys
 
@@ -60,7 +61,7 @@ def test_real_stdio_mcp_client(sample_database):
                 initialized = await session.initialize()
 
                 assert initialized.serverInfo.name == "allos-mcp"
-                assert initialized.serverInfo.version == "0.1.1"
+                assert initialized.serverInfo.version == version("allos-mcp")
 
                 tools = await session.list_tools()
 
