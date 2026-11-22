@@ -1,15 +1,30 @@
+
 services:
   allos-mcp:
-    build: ..
-    user: "${ALLOS_UID:-1000}:${ALLOS_GID:-1000}"
+    image: ghcr.io/mvrauwdeunt/allos-mcp:${ALLOS_VERSION:-edge}
+    container_name: allos-mcp
+
+    user: "${ALLOS_UID:-10001}:${ALLOS_GID:-10001}"
+
     environment:
       ALLOS_DB_PATH: /data/allos.db
-      ALLOS_PROFILE_ID: "${ALLOS_PROFILE_ID:?set ALLOS_PROFILE_ID}"
+      ALLOS_PROFILE_ID: "${ALLOS_PROFILE_ID:?Set ALLOS_PROFILE_ID}"
+
     volumes:
-      # Mount the full directory for SQLite WAL/SHM access.
-      - "${ALLOS_DATA_DIR:?set ALLOS_DATA_DIR}:/data:ro"
+      # Mount the entire SQLite directory, including any WAL/SHM files.
+      - "${ALLOS_DATA_DIR:?Set ALLOS_DATA_DIR}:/data:ro"
+
     ports:
-      # Loopback only. Never expose unauthenticated medical data directly.
+      # The host endpoint is loopback-only, not accessible over LAN/Tailscale.
       - "127.0.0.1:8765:8765"
-    command: ["--transport", "http", "--host", "0.0.0.0", "--allow-nonloopback"]
+
+    command:
+      - "--transport"
+      - "http"
+      - "--host"
+      - "0.0.0.0"
+      - "--port"
+      - "8765"
+      - "--allow-nonloopback"
+
     restart: unless-stopped
