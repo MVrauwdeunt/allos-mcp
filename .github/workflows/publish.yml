@@ -72,7 +72,7 @@ jobs:
           labels: |
             org.opencontainers.image.title=Allos MCP Server
             org.opencontainers.image.description=Read-only MCP server for the Allos health application
-            org.opencontainers.image.licenses=MIT
+            org.opencontainers.image.licenses=AGPL-3.0-only
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
 
       - name: Build and push image

@@ -236,7 +236,7 @@ Tests use synthetic fixtures, not real medical records.
 - Only allowlisted tables and columns are exposed. Not all medication, diagnosis, narrative, or document data is available.
 - Read-only database access prevents modifications **through this integration**, but does not prevent data disclosure to clients or model providers.
 - Schema compatibility may change when Allos is upgraded; review and retest against the new schema.
-- This MIT-licensed project is independent of Allos and does not bundle Allos source code.
+- This AGPL-3.0-only licensed project is independent of Allos and does not bundle Allos source code.
 
 ## Roadmap
 
@@ -245,6 +245,13 @@ Tests use synthetic fixtures, not real medical records.
 - Evaluate authenticated HTTP access and audit logging.
 - Improve package distribution and release automation.
 
+
 ## License
 
-MIT. See [LICENSE](LICENSE).
+Allos MCP is licensed under the GNU Affero General Public License
+version 3.0 only (AGPL-3.0-only).
+
+This project uses the same license as the upstream Allos application,
+but remains an independent, unofficial community integration.
+
+See [LICENSE](LICENSE) for the complete license text.

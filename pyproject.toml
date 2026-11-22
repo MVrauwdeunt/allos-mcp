@@ -9,7 +9,7 @@ version = "0.1.1"
 description = "Read-only MCP integration for the Allos personal health database"
 readme = "README.md"
 requires-python = ">=3.11"
-license = "MIT"
+license = "AGPL-3.0-only"
 authors = [{name = "Allos MCP contributors"}]
 dependencies = ["mcp>=1.12,<2"]
 classifiers = [
