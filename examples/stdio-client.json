@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "allos": {
+      "command": "/opt/allos-mcp/.venv/bin/allos-mcp",
+      "env": {
+        "ALLOS_DB_PATH": "/var/lib/allos/allos.db",
+        "ALLOS_PROFILE_ID": "2"
+      }
+    }
+  }
+}
