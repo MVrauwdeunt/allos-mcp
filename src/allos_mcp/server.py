@@ -2,12 +2,13 @@
 import argparse
 import os
 from functools import lru_cache
-
+from importlib.metadata import version
 from mcp.server.fastmcp import FastMCP
 from .db import AllosDB
 
 mcp = FastMCP("allos-mcp", json_response=True, host="127.0.0.1", port=8765)
-
+# Report the Allos MCP package version instead of the MCP SDK version.
+mcp._mcp_server.version = version("allos-mcp")
 
 @lru_cache(maxsize=1)
 def database() -> AllosDB:
