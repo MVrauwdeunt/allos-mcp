@@ -1,7 +1,7 @@
 
 services:
   allos-mcp:
-    image: ghcr.io/mvrauwdeunt/allos-mcp:${ALLOS_VERSION:-edge}
+    image: ghcr.io/mvrauwdeunt/allos-mcp:${ALLOS_VERSION:-0.2.0}
     container_name: allos-mcp
 
     user: "${ALLOS_UID:-10001}:${ALLOS_GID:-10001}"
@@ -9,7 +9,6 @@ services:
     environment:
       ALLOS_DB_PATH: /data/allos.db
       ALLOS_PROFILE_ID: "${ALLOS_PROFILE_ID:?Set ALLOS_PROFILE_ID}"
-
       ALLOS_MCP_AUTH_TOKEN_FILE: /run/secrets/token
       ALLOS_MCP_TLS_CERT_FILE: /run/secrets/server.crt
       ALLOS_MCP_TLS_KEY_FILE: /run/secrets/server.key
@@ -20,7 +19,6 @@ services:
     volumes:
       # SQLite data, including WAL and SHM files.
       - "${ALLOS_DATA_DIR:?Set ALLOS_DATA_DIR}:/data:ro"
-
       # Authentication token and TLS files.
       - "${ALLOS_SECRETS_DIR:?Set ALLOS_SECRETS_DIR}:/run/secrets:ro"
 
