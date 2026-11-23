@@ -1,0 +1,48 @@
+"""Explicit MCP exposure policy; schema migrations cannot add readable fields."""
+
+# List only reviewed fields. In particular, omit free text, document payloads,
+# credentials and provider/document identifiers. No policy is inferred from
+# SQLite types or field names.
+_FIELDS = {
+    "activities": "id profile_id date type duration_min distance_km intensity start_time end_time avg_hr max_hr elevation_m avg_speed_kmh max_speed_kmh relative_effort avg_power_w max_power_w weighted_avg_power_w avg_cadence avg_temp_c kilojoules workout_type",
+    "activity_laps": "id profile_id activity_id lap_index distance_m moving_time_sec elapsed_time_sec elevation_gain_m average_speed_mps max_speed_mps average_cadence average_watts average_heartrate max_heartrate",
+    "allergies": "id profile_id substance_code substance_code_system severity status onset_date created_at",
+    "appointments": "id profile_id date scheduled_at status created_at",
+    "body_metrics": "id profile_id date weight_kg body_fat_pct resting_hr",
+    "care_goals": "id profile_id code code_system target_date status created_at",
+    "care_plan_items": "id profile_id code code_system category planned_date status created_at",
+    "conditions": "id profile_id code code_system status onset_date resolved_date created_at",
+    "dental_procedures": "id profile_id status",
+    "encounters": "id profile_id date end_date type class_code created_at",
+    "endurance_plans": "id profile_id discipline event_date target_distance_km target_time_sec status completed_on created_at",
+    "family_history": "id profile_id relation code code_system onset_age deceased created_at",
+    "fasts": "id profile_id started_at ended_at created_at",
+    "fitness_assessments": "id profile_id date activity_id created_at",
+    "food_log_events": "id profile_id date logged_at created_at",
+    "food_sensitivities": "id profile_id trigger_kind trigger_slug status",
+    "frequency_targets": "id profile_id scope_kind per_week created_at",
+    "glucose_trace": "profile_id ts mgdl",
+    "goals": "id profile_id category target_value current_value unit target_date status created_at metric target_weight_kg target_reps target_sets target_duration_sec body_metric baseline_value archived",
+    "hr_minutes": "profile_id ts bpm bpm_min bpm_max n",
+    "illness_episodes": "id profile_id started_at ended_at",
+    "imaging_studies": "id profile_id modality dose_msv",
+    "immunizations": "id profile_id date kind created_at",
+    "injuries": "id profile_id status since resolved_date created_at",
+    "intake_items": "id profile_id active critical quantity_on_hand qty_per_dose kind as_needed created_at priority",
+    "medical_records": "id profile_id date category unit created_at flag value_num",
+    "metric_samples": "id profile_id metric date start_time end_time value",
+    "mood_logs": "id profile_id date valence energy anxiety created_at updated_at",
+    "niggles": "id profile_id region laterality reported_at last_reported_at",
+    "optical_prescriptions": "id profile_id kind",
+    "practice_logs": "id profile_id date time duration_min created_at",
+    "preventive_events": "id profile_id rule_key date created_at",
+    "procedures": "id profile_id code code_system date created_at",
+    "protocols": "id profile_id start_date end_date created_at",
+    "routines": "id profile_id active started_date position cycle_weeks created_at",
+    "skin_lesions": "id profile_id body_region body_side",
+    "stool_events": "id profile_id date recorded_at created_at occurred_at type",
+    "substance_log_events": "id profile_id substance date recorded_at created_at occurred_at",
+    "symptom_logs": "id profile_id date severity created_at",
+}
+
+READABLE_FIELDS = {table: frozenset(fields.split()) for table, fields in _FIELDS.items()}
