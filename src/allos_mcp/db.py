@@ -1,38 +1,14 @@
 """Minimal, read-only Allos SQLite adapter. Never accepts model-written SQL."""
-import os
-import re
 import sqlite3
+from contextlib import closing
 from datetime import date
 from pathlib import Path
 from urllib.parse import quote
 
-# Explicit review list. New Allos tables are not automatically exposed.
-TABLES = frozenset({
-    "activities", "activity_laps", "allergies", "allergy_reactions",
-    "appointments", "body_metrics", "care_goals", "care_plan_items",
-    "conditions", "dental_procedures", "encounters", "endurance_plans",
-    "exercise_sets", "family_history", "fasts", "fitness_assessments",
-    "fitness_assessment_entries", "food_daily_totals", "food_log_events",
-    "food_sensitivities", "frequency_targets", "glucose_trace", "goals",
-    "hr_minutes", "illness_episodes", "imaging_studies", "immunizations",
-    "injuries", "intake_item_logs", "intake_items", "medical_records",
-    "medication_courses", "metric_samples", "mood_logs", "niggles",
-    "optical_prescriptions", "practice_logs", "preventive_events",
-    "procedures", "protein_daily_totals", "protocols", "routine_days",
-    "routines", "sessions", "skin_lesions", "stool_events",
-    "substance_daily_totals", "substance_log_events", "symptom_logs",
-})
-# No auth, integration credentials, medical document payloads, photos, videos,
-# genomic variants, narrative free text, or unreviewed tables.
-# Keep free-text columns out of the generic reader as well.
-DENIED_COLUMNS = frozenset({
-    "notes", "raw_extraction", "import_report", "stored_path", "filename",
-    "patient_name", "content", "body", "description", "components",
-    "metadata", "payload", "external_id", "source_payload", "title",
-    "address", "email", "phone", "photo", "image", "url", "secret", "token",
-})
-IDENT = re.compile(r"^[a-z][a-z0-9_]*$")
+from .fields import READABLE_FIELDS
+
 DATE_COLUMNS = ("date", "ts", "occurred_at", "started_at", "start_time", "logged_at", "created_at")
+MAX_TREND_DAYS = 366
 
 
 class AllosDB:
@@ -52,51 +28,61 @@ class AllosDB:
         conn.execute("PRAGMA busy_timeout=3000")
         return conn
 
-    @staticmethod
-    def _columns(conn, table):
-        # table is always in the reviewed TABLES allowlist.
-        return {row[1] for row in conn.execute(f'PRAGMA table_info("{table}")')}
+    def validate(self):
+        with closing(self.connect()) as conn:
+            conn.execute("SELECT name FROM main.sqlite_schema LIMIT 1").fetchone()
 
     @staticmethod
-    def _safe_columns(columns):
-        return sorted(c for c in columns if IDENT.fullmatch(c) and c not in DENIED_COLUMNS
-                      and not any(word in c for word in ("password", "secret", "token", "photo", "video", "path")))
+    def _table_info(conn, table) -> dict[str, int]:
+        # Use the same table rule in discovery and direct reads. Do not read views.
+        present = conn.execute(
+            "SELECT 1 FROM main.sqlite_schema WHERE type='table' AND name=? "
+            "AND sql NOT LIKE 'CREATE VIRTUAL TABLE %'",
+            (table,),
+        ).fetchone()
+        if not present:
+            return {}
+        return {row['name']: row['pk'] for row in conn.execute(
+            "SELECT name, pk FROM pragma_table_info(?, 'main')", (table,),
+        )}
 
     def catalog(self):
-        with self.connect() as conn:
-            present = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        with closing(self.connect()) as conn:
             result = []
-            for table in sorted(TABLES & present):
-                columns = self._columns(conn, table)
-                if "profile_id" not in columns:
+            for table, reviewed in sorted(READABLE_FIELDS.items()):
+                allowed = reviewed & self._table_info(conn, table).keys()
+                if "profile_id" not in allowed or len(allowed) < 2:
                     continue
-                result.append({"table": table, "fields": self._safe_columns(columns),
-                               "date_field": next((x for x in DATE_COLUMNS if x in columns), None)})
+                result.append({"table": table, "fields": sorted(allowed),
+                               "date_field": next((x for x in DATE_COLUMNS if x in allowed), None)})
             return result
 
     def query(self, table: str, *, fields=None, start=None, end=None, limit=50, offset=0):
-        if table not in TABLES:
+        if table not in READABLE_FIELDS:
             raise ValueError("Table is not available")
         limit, offset = int(limit), int(offset)
         if not 1 <= limit <= 100 or not 0 <= offset <= 10000:
             raise ValueError("Limit must be 1..100 and offset 0..10000")
-        for val in (start, end):
-            if val is not None:
-                date.fromisoformat(val)  # Only ISO dates, not arbitrary filter expressions.
-        with self.connect() as conn:
-            columns = self._columns(conn, table)
-            if "profile_id" not in columns:
+        start = date.fromisoformat(start).isoformat() if start is not None else None
+        end = date.fromisoformat(end).isoformat() if end is not None else None
+        if start and end and start > end:
+            raise ValueError("Start must not be after end")
+        with closing(self.connect()) as conn:
+            info = self._table_info(conn, table)
+            allowed = READABLE_FIELDS[table] & info.keys()
+            if "profile_id" not in allowed:
                 raise ValueError("Table is missing or not profile-scoped")
-            allowed = set(self._safe_columns(columns))
+            if len(allowed) < 2:
+                raise ValueError("Table has no supported data fields")
             selected = list(fields) if fields is not None else sorted(allowed)
             if not selected or len(selected) > 40 or any(f not in allowed for f in selected):
                 raise ValueError("Invalid or disallowed fields")
-            date_col = next((x for x in DATE_COLUMNS if x in columns), None)
+            date_col = next((x for x in DATE_COLUMNS if x in allowed), None)
             if (start or end) and not date_col:
                 raise ValueError("Table has no supported date field")
             # date(timestamp) handles ISO timestamps; dates are parameterized.
             clauses = ['"profile_id" = ?']
-            params = [self.profile_id]
+            params: list[int | str] = [self.profile_id]
             if start:
                 clauses.append(f'date("{date_col}") >= date(?)')
                 params.append(start)
@@ -105,35 +91,45 @@ class AllosDB:
                 params.append(end)
             col_sql = ", ".join(f'"{c}"' for c in selected)
             where_sql = " AND ".join(clauses)
-            order_sql = f' ORDER BY "{date_col}" DESC' if date_col else ''
-            sql = f'SELECT {col_sql} FROM "{table}" WHERE {where_sql}{order_sql} LIMIT ? OFFSET ?'
+            pk_fields = sorted((c for c in info if info[c]), key=info.__getitem__)
+            order = [f'"{date_col}" DESC'] if date_col else []
+            # Prefer a reviewed primary key. Otherwise sort the projected
+            # values: rows that tie then return the same data to the client.
+            sort_fields = pk_fields if pk_fields and set(pk_fields) <= allowed else []
+            sort_fields += sorted(set(selected) - set(sort_fields))
+            order.extend(f'"{c}" COLLATE BINARY' for c in sort_fields)
+            order.extend(f'typeof("{c}")' for c in sorted(set(selected)))
+            order_sql = ", ".join(order)
+            sql = (f'SELECT {col_sql} FROM main."{table}" WHERE {where_sql} '
+                   f'ORDER BY {order_sql} LIMIT ? OFFSET ?')
             rows = [dict(r) for r in conn.execute(sql, [*params, limit, offset])]
             return {"table": table, "profile_id": self.profile_id, "rows": rows,
                     "count_returned": len(rows), "limit": limit, "offset": offset}
 
     def metrics(self):
-        with self.connect() as conn:
-            cols = self._columns(conn, "metric_samples")
+        with closing(self.connect()) as conn:
+            cols = READABLE_FIELDS['metric_samples'] & self._table_info(conn, "metric_samples").keys()
             if not {"profile_id", "metric"} <= cols:
                 return []
             return [dict(r) for r in conn.execute(
-                'SELECT metric, COUNT(*) AS sample_count FROM metric_samples '
+                'SELECT metric, COUNT(*) AS sample_count FROM main.metric_samples '
                 'WHERE profile_id = ? GROUP BY metric ORDER BY metric', (self.profile_id,))]
 
     def trend(self, metric: str, start: str, end: str):
         if not metric or len(metric) > 100:
             raise ValueError("Invalid metric")
-        date.fromisoformat(start)
-        date.fromisoformat(end)
-        if start > end:
-            raise ValueError("Start must be before end")
-        with self.connect() as conn:
-            columns = self._columns(conn, "metric_samples")
+        start_day, end_day = date.fromisoformat(start), date.fromisoformat(end)
+        if start_day > end_day:
+            raise ValueError("Start must not be after end")
+        if (end_day - start_day).days >= MAX_TREND_DAYS:
+            raise ValueError(f"Trend range must not exceed {MAX_TREND_DAYS} days inclusive")
+        with closing(self.connect()) as conn:
+            columns = READABLE_FIELDS['metric_samples'] & self._table_info(conn, "metric_samples").keys()
             if not {"profile_id", "metric", "date", "value"} <= columns:
                 raise ValueError("Metric sample schema not supported")
             return [dict(r) for r in conn.execute(
-                'SELECT date, COUNT(*) AS samples, ROUND(AVG(value), 3) AS average, '
+                'SELECT date(date) AS date, COUNT(*) AS samples, ROUND(AVG(value), 3) AS average, '
                 'MIN(value) AS minimum, MAX(value) AS maximum '
-                'FROM metric_samples WHERE profile_id = ? AND metric = ? '
-                'AND date >= ? AND date <= ? GROUP BY date ORDER BY date LIMIT 366',
-                (self.profile_id, metric, start, end))]
+                'FROM main.metric_samples WHERE profile_id = ? AND metric = ? '
+                'AND date(date) BETWEEN ? AND ? GROUP BY date(date) ORDER BY 1',
+                (self.profile_id, metric, start_day.isoformat(), end_day.isoformat()))]
