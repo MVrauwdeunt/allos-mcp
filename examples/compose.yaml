@@ -10,13 +10,24 @@ services:
       ALLOS_DB_PATH: /data/allos.db
       ALLOS_PROFILE_ID: "${ALLOS_PROFILE_ID:?Set ALLOS_PROFILE_ID}"
 
+      ALLOS_MCP_AUTH_TOKEN_FILE: /run/secrets/token
+      ALLOS_MCP_TLS_CERT_FILE: /run/secrets/server.crt
+      ALLOS_MCP_TLS_KEY_FILE: /run/secrets/server.key
+
+      HOME: /tmp
+      TMPDIR: /tmp
+
     volumes:
-      # Mount the entire SQLite directory, including any WAL/SHM files.
+      # SQLite data, including WAL and SHM files.
       - "${ALLOS_DATA_DIR:?Set ALLOS_DATA_DIR}:/data:ro"
 
+      # Authentication token and TLS files.
+      - "${ALLOS_SECRETS_DIR:?Set ALLOS_SECRETS_DIR}:/run/secrets:ro"
+
     ports:
-      # The host endpoint is loopback-only, not accessible over LAN/Tailscale.
-      - "127.0.0.1:8765:8765"
+      # Loopback by default. Set an explicit host bind address
+      # only when remote HTTPS clients need direct access.
+      - "${ALLOS_BIND_ADDRESS:-127.0.0.1}:8765:8765"
 
     command:
       - "--transport"
@@ -26,5 +37,16 @@ services:
       - "--port"
       - "8765"
       - "--allow-nonloopback"
+
+    read_only: true
+
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,size=16m
+
+    security_opt:
+      - no-new-privileges:true
+
+    cap_drop:
+      - ALL
 
     restart: unless-stopped

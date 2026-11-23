@@ -4,155 +4,109 @@
 [![CI](https://github.com/MVrauwdeunt/allos-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/MVrauwdeunt/allos-mcp/actions/workflows/ci.yml)
 [![Container publishing](https://github.com/MVrauwdeunt/allos-mcp/actions/workflows/publish.yml/badge.svg)](https://github.com/MVrauwdeunt/allos-mcp/actions/workflows/publish.yml)
 
-An **unofficial, experimental, read-only [Model Context Protocol (MCP)](https://modelcontextprotocol.io/)** server for the self-hosted [Allos](https://github.com/FloorLamp/allos) personal health application.
+An unofficial, experimental, read-only Model Context Protocol
+(MCP) server for the self-hosted
+[Allos](https://github.com/FloorLamp/allos)
+personal health application.
 
-Allos MCP exposes selected structured health measurements to compatible AI assistants without changing Allos, copying data to a second database, or requiring a cloud synchronization service.
+Allos MCP provides selected structured health measurements
+to compatible AI assistants.
 
-> **Privacy:** The server is read-only, but connected AI clients can retrieve sensitive health data and may forward it to their model providers. Only connect trusted clients. Do not expose the unauthenticated HTTP endpoint publicly.
->
-> **Compatibility:** Tested against a limited Allos database schema and synthetic test fixtures. Not affiliated with or endorsed by the Allos maintainers.
+The server reads directly from an existing Allos SQLite database.
+It does not modify the database or require cloud synchronization.
 
-## Why does this exist?
+> **Privacy:** Connected AI clients may retrieve sensitive personal
+> health information. Only connect trusted clients and review
+> how their model providers process retrieved data.
 
-Allos has a token-authenticated HTTP API for certain document integrations, but its current API does **not** expose general read endpoints for health measurements. Allos MCP fills that gap by reading selected measurements directly from Allos's SQLite database.
-
-| Capability | Allos MCP | Existing Allos API |
-| --- | --- | --- |
-| Read supported health measurements | Yes | No general measurement read endpoint |
-| Filter readings by date and paginate | Yes | No general measurement read endpoint |
-| Summarize daily numeric trends | Yes | No general measurement read endpoint |
-| Discover supported health metrics | Yes | No general measurement read endpoint |
-| Upload documents | No | Yes, with the appropriate API capability |
-| Create, edit, or delete health measurements | No | Not supported by the documented document API |
-
-Examples of questions an MCP client might answer, if the data is available and allowlisted:
-
-- "How has my weight changed over the past three months?"
-- "What blood pressure readings do I have from last month?"
-- "Compare my recorded measurements from January and June."
-
-The MCP server returns data and simple aggregates. Interpretation is performed by your MCP client or AI model; it is **not** medical advice.
+> **Compatibility:** This project is independent of Allos and
+> has been tested against a limited selection of database schemas.
+> It is not affiliated with or endorsed by the Allos maintainers.
 
 ## Features
 
-- Official Python MCP SDK, with **stdio** and **Streamable HTTP** transports.
-- SQLite opened read-only (`mode=ro`, `PRAGMA query_only=ON`).
-- Explicit table/column restrictions and an administrator-configured `ALLOS_PROFILE_ID`.
-- No client-supplied SQL, database writes, or credential access.
-- Four MCP tools:
+- Official Python MCP SDK.
+- STDIO and Streamable HTTP transports.
+- Direct HTTPS support without a reverse proxy.
+- Bearer-token authentication for HTTP connections.
+- TLS certificate verification by MCP clients.
+- Read-only SQLite database access.
+- Explicit table and field restrictions.
+- Profile-scoped queries.
+- Automated security and integration tests.
+- Docker/Podman container support.
+- Linux AMD64 and ARM64 container images.
 
-| Tool | Purpose |
+## MCP tools
+
+| Tool | Description |
 | --- | --- |
-| `allos_catalog` | Show approved tables and accessible columns |
-| `allos_metrics` | List available metric names and sample counts |
-| `allos_read` | Read approved records, with date filters and pagination (up to 100 per request) |
-| `allos_metric_trend` | Daily count, minimum, maximum and mean for a numeric metric |
+| `allos_catalog` | Discover approved tables and available fields |
+| `allos_metrics` | Discover available health metrics |
+| `allos_read` | Read approved profile-scoped health records |
+| `allos_metric_trend` | Calculate daily metric trends |
 
-Only allowlisted tables with a `profile_id` column can be read. Coverage depends on the installed Allos schema; some categories of health data are intentionally unavailable.
+The database backend restricts which tables and fields can be
+queried.
+
+Clients cannot submit arbitrary SQL statements.
+
+The MCP server does not provide write operations.
 
 ## Requirements
 
-- Python **3.11+** for a source installation, or Docker/Podman for containers.
-- Filesystem read permissions on the **Allos SQLite database directory**.
-- The relevant Allos `profile_id` (a server setting, **not** a client authentication mechanism).
+- Python 3.11 or newer for source installations.
+- An existing Allos SQLite database.
+- Read permissions on the complete database directory.
+- A valid Allos profile ID.
+- OpenSSL for generating local test certificates.
 
-The database path in examples is illustrative; it may differ in your installation. Use the **entire SQLite directory**, not just a single file, to account for `-wal` and `-shm` sidecar files. Never make a health database world-readable to work around permissions.
+For HTTPS installations:
 
-## Install using a published GHCR image
+- A cryptographically random Bearer token.
+- A TLS server certificate.
+- The corresponding TLS private key.
+- A client that supports custom HTTP authorization headers
+  and certificate verification.
 
-> **Availability:** These commands work once the maintainers have published the first GHCR package and made it public. Until then, use [Build a local container image](#build-a-local-container-image) below. No image is claimed to exist before its successful release.
+## Installation from source
 
-The canonical image name is `ghcr.io/mvrauwdeunt/allos-mcp`.
-
-- `:edge` tracks the latest successfully built `main` commit and may change at any time.
-- `:0.1.0`, `:0.2.0`, and similar tags are release versions, created from `v*` Git tags once these tags are mirrored to GitHub.
-- `:sha-...` identifies a source commit.
-
-Pull a published version (replace `0.1.0` with a tag actually listed in [GitHub Packages](https://github.com/users/MVrauwdeunt/packages/container/package/allos-mcp)):
-
-```bash
-podman pull ghcr.io/mvrauwdeunt/allos-mcp:0.1.0
-```
-
-Start the server on the machine that can access your Allos database:
-
-```bash
-podman run -d --name allos-mcp --restart unless-stopped \
-  -p 127.0.0.1:8765:8765 \
-  -v /path/to/allos-data:/data:ro \
-  -e ALLOS_DB_PATH=/data/allos.db \
-  -e ALLOS_PROFILE_ID=1 \
-  ghcr.io/mvrauwdeunt/allos-mcp:0.1.0 \
-  --transport http --host 0.0.0.0 --port 8765 --allow-nonloopback
-```
-
-Replace the directory, profile ID, and tag with your actual values. The container normally runs as UID **10001**; its user must have read permission for the directory and database. Docker users can replace `podman` with `docker`.
-
-**Networking:** `0.0.0.0` is only the *container-internal* listener. `-p 127.0.0.1:8765:8765` ensures the host only publishes it locally. `--allow-nonloopback` disables a bind-address safety check; it **does not** add authentication. Never publish this port on all host interfaces without a separately secured gateway.
-
-### Docker Compose or Podman Compose
-
-The checked-in [`examples/compose.yaml`](examples/compose.yaml) uses the GHCR image instead of rebuilding from source:
-
-```bash
-export ALLOS_DATA_DIR=/path/to/allos-data
-export ALLOS_PROFILE_ID=1
-export ALLOS_VERSION=0.1.0
-
-# Override only if the container UID/GID cannot read the database directory:
-# export ALLOS_UID=1000 ALLOS_GID=1000
-
-docker compose -f examples/compose.yaml up -d
-```
-
-For Podman, use `podman compose` with an installed Compose provider. Check permissions carefully before changing the container user. While no release is available, set `ALLOS_VERSION=edge` **only after** the `edge` image exists, or use the local build instructions below.
-
-## Build a local container image
-
-This method works before any GHCR image is published:
+Clone the repository:
 
 ```bash
 git clone https://github.com/MVrauwdeunt/allos-mcp.git
 cd allos-mcp
-podman build -t allos-mcp:local -f Containerfile .
 ```
 
-Run the locally built image:
+Create a Python environment:
 
 ```bash
-podman run -d --name allos-mcp --restart unless-stopped \
-  -p 127.0.0.1:8765:8765 \
-  -v /path/to/allos-data:/data:ro \
-  -e ALLOS_DB_PATH=/data/allos.db \
-  -e ALLOS_PROFILE_ID=1 \
-  localhost/allos-mcp:local \
-  --transport http --host 0.0.0.0 --port 8765 --allow-nonloopback
-```
-
-For a temporary test, replace `-d --restart unless-stopped` with `--rm`. Do not run two containers mapped to the same host port simultaneously.
-
-## Install from Python source (local stdio)
-
-Stdio is a good choice when the MCP client runs on the same machine as the SQLite files:
-
-```bash
-git clone https://github.com/MVrauwdeunt/allos-mcp.git
-cd allos-mcp
 python3 -m venv .venv
 .venv/bin/python -m pip install .
-.venv/bin/allos-mcp --help
 ```
 
-Example MCP client configuration (use actual absolute paths):
+### STDIO mode
+
+STDIO is the default transport.
+
+```bash
+ALLOS_DB_PATH=/path/to/allos.db \
+ALLOS_PROFILE_ID=1 \
+  .venv/bin/allos-mcp
+```
+
+STDIO does not use HTTP authentication or TLS because the
+MCP client communicates with a locally launched process.
+
+Example client configuration:
 
 ```json
 {
   "mcpServers": {
     "allos": {
       "command": "/opt/allos-mcp/.venv/bin/allos-mcp",
-      "args": ["--transport", "stdio"],
       "env": {
-        "ALLOS_DB_PATH": "/var/lib/allos/allos.db",
+        "ALLOS_DB_PATH": "/path/to/allos.db",
         "ALLOS_PROFILE_ID": "1"
       }
     }
@@ -160,98 +114,327 @@ Example MCP client configuration (use actual absolute paths):
 }
 ```
 
-Stdio clients launch the process themselves. See [`examples/stdio-client.json`](examples/stdio-client.json). The package is not yet published to PyPI: `pip install allos-mcp` without a local source checkout is not a supported installation method yet.
+## Secure HTTPS mode
 
-## Local HTTP without a container
+HTTP transport requires both TLS and Bearer authentication.
 
-```bash
-ALLOS_DB_PATH=/var/lib/allos/allos.db \
-ALLOS_PROFILE_ID=1 \
-  .venv/bin/allos-mcp --transport http --host 127.0.0.1 --port 8765
-```
+Allos MCP provides HTTPS directly through its Python server.
+A reverse proxy is not required.
 
-Endpoint: `http://127.0.0.1:8765/mcp`. This endpoint has **no built-in HTTP authentication**.
+### Generate a token
 
-## Remote client access over SSH
-
-For a client on another computer, keep HTTP bound to `127.0.0.1` on the Allos MCP host and open a tunnel **from the client computer**:
+For local development:
 
 ```bash
-ssh -N -L 18765:127.0.0.1:8765 user@allos-server
+mkdir -p .local/secrets
+chmod 700 .local/secrets
+
+openssl rand -hex 32 > .local/secrets/token
+chmod 600 .local/secrets/token
 ```
 
-Configure the MCP client to use `http://127.0.0.1:18765/mcp`. The tunnel requires a working SSH account and runs while the SSH session remains open. The forwarded port is accessible to suitable local processes; SSH alone does not implement per-MCP-client authorization. See [`examples/remote-over-ssh.md`](examples/remote-over-ssh.md).
-
-## Verify that the HTTP endpoint works
-
-A plain GET may return `400 Bad Request: Missing session ID`; that alone does not mean the container is broken. Initialize a session instead:
+### Generate a local test certificate
 
 ```bash
-curl -si --max-time 10 http://127.0.0.1:8765/mcp \
-  -H 'Content-Type: application/json' \
-  -H 'Accept: application/json, text/event-stream' \
-  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"curl-test","version":"1.0"}}}'
+openssl req -x509 -newkey rsa:3072 -sha256 \
+  -nodes \
+  -days 30 \
+  -keyout .local/secrets/server.key \
+  -out .local/secrets/server.crt \
+  -subj "/CN=localhost" \
+  -addext "subjectAltName=DNS:localhost,IP:127.0.0.1"
+
+chmod 600 .local/secrets/server.key
 ```
 
-Expected: HTTP `200`, an `mcp-session-id` response header, and a JSON-RPC `initialize` result. To call tools, use an MCP-aware client that completes the session handshake.
+This certificate is intended only for local development.
 
-## Development and CI
+For remote deployment, use a certificate with a subjectAltName
+matching the DNS name or IP address used by the MCP client.
+
+The client must trust the issuing certificate authority or
+the explicitly trusted self-signed server certificate.
+
+Never disable certificate verification to work around
+a certificate mismatch.
+
+### Configure the server
 
 ```bash
-python3 -m venv .venv
-.venv/bin/python -m pip install -e '.[test]'
-.venv/bin/python -m pytest -q
+export ALLOS_DB_PATH="/path/to/allos.db"
+export ALLOS_PROFILE_ID=1
+
+export ALLOS_MCP_AUTH_TOKEN_FILE="$PWD/.local/secrets/token"
+export ALLOS_MCP_TLS_CERT_FILE="$PWD/.local/secrets/server.crt"
+export ALLOS_MCP_TLS_KEY_FILE="$PWD/.local/secrets/server.key"
 ```
 
-Tests use synthetic fixtures, not real medical records.
+Start the server:
 
-- [CI workflow](.github/workflows/ci.yml): tests for Python 3.11–3.13, package build, container build.
-- [Publish workflow](.github/workflows/publish.yml): re-runs tests, builds `linux/amd64` and `linux/arm64`, and publishes to GHCR using the GitHub Actions `GITHUB_TOKEN` after a `main` push, mirrored release tag, or manual dispatch.
-- **Forgejo is the source of truth.** Development pushes to Forgejo; GitHub is a one-way mirror and is used for GitHub Actions/GHCR publishing. Tags must reach GitHub for versioned releases.
+```bash
+.venv/bin/allos-mcp \
+  --transport http \
+  --host 127.0.0.1 \
+  --port 8765
+```
 
-### Maintainer: publishing a new container version
+Endpoint:
 
-1. Confirm tests pass and the Forgejo → GitHub mirror has successfully synchronized `main`.
-2. Verify the GHCR publish workflow succeeds for `main` and produces `:edge`.
-3. Make the GHCR package public under GitHub package settings if anonymous pulls are desired.
-4. Ensure the Forgejo mirror also synchronizes **Git tags**; a `main`-only branch filter may prevent this.
-5. Create an annotated release tag in the Forgejo checkout:
+```text
+https://127.0.0.1:8765/mcp
+```
 
-   ```bash
-   git tag -a v0.1.0 -m "Allos MCP v0.1.0"
-   git push origin v0.1.0
-   ```
+HTTP requests without a valid token receive HTTP 401.
 
-6. Confirm tag `v0.1.0` exists on GitHub and the publish workflow produced `ghcr.io/mvrauwdeunt/allos-mcp:0.1.0`.
-7. Pull and test the published image before announcing the release.
+A valid token does not bypass database restrictions.
 
-**Note:** Git push mirroring synchronizes Git refs, not GitHub Releases, release attachments, or package visibility. Version tags and published packages are separate things.
+### Test authentication
 
-## Security and current limitations
+Without a token:
 
-- Experimental integration, not a hardened medical-record API.
-- **No HTTP authentication**, per-client authorization, audit logging, or rate limiting.
-- The server uses one administrator-selected profile ID. Connected clients may read all **allowlisted** data for that profile, within per-query limits; the limits do not prevent repeated requests.
-- No arbitrary SQL, writes, record deletion, or document upload.
-- Only allowlisted tables and columns are exposed. Not all medication, diagnosis, narrative, or document data is available.
-- Read-only database access prevents modifications **through this integration**, but does not prevent data disclosure to clients or model providers.
-- Schema compatibility may change when Allos is upgraded; review and retest against the new schema.
-- This AGPL-3.0-only licensed project is independent of Allos and does not bundle Allos source code.
+```bash
+curl --cacert .local/secrets/server.crt \
+  -i https://localhost:8765/mcp
+```
+
+Expected:
+
+```text
+HTTP/1.1 401 Unauthorized
+```
+
+With an invalid token:
+
+```bash
+curl --cacert .local/secrets/server.crt \
+  -i \
+  -H 'Authorization: Bearer invalid-token' \
+  https://localhost:8765/mcp
+```
+
+Expected: HTTP 401.
+
+With the configured token:
+
+```bash
+curl --cacert .local/secrets/server.crt \
+  -i \
+  -H "Authorization: Bearer $(cat .local/secrets/token)" \
+  https://localhost:8765/mcp
+```
+
+A plain GET may return an MCP protocol response such as
+HTTP 406 because the request does not contain the necessary
+MCP headers.
+
+A successful authorization test must not return HTTP 401.
+
+Use an actual MCP client to test initialization and tool calls.
+
+## Container deployment
+
+Published images use:
+
+```text
+ghcr.io/mvrauwdeunt/allos-mcp
+```
+
+Image tags:
+
+- `edge`: latest successfully published development image.
+- `0.1.2`: previous stable release.
+- `0.2.0`: secure release, once published.
+- `sha-*`: images associated with specific commits.
+
+### Build locally
+
+Before the secure version is released, build from the
+development branch:
+
+```bash
+podman build \
+  -t localhost/allos-mcp:secure-test \
+  -f Containerfile .
+```
+
+### Run with Podman
+
+```bash
+podman run --rm \
+  --name allos-mcp \
+  -p 127.0.0.1:8765:8765 \
+  -v /path/to/allos-data:/data:ro \
+  -v /path/to/allos-mcp-secrets:/run/secrets:ro \
+  -e ALLOS_DB_PATH=/data/allos.db \
+  -e ALLOS_PROFILE_ID=1 \
+  -e ALLOS_MCP_AUTH_TOKEN_FILE=/run/secrets/token \
+  -e ALLOS_MCP_TLS_CERT_FILE=/run/secrets/server.crt \
+  -e ALLOS_MCP_TLS_KEY_FILE=/run/secrets/server.key \
+  localhost/allos-mcp:secure-test \
+  --transport http \
+  --host 0.0.0.0 \
+  --port 8765 \
+  --allow-nonloopback
+```
+
+Replace all example paths and the profile ID.
+
+The entire SQLite directory must be mounted, including
+any WAL and SHM sidecar files.
+
+The container user must have permission to read the mounted
+database, token and certificate files.
+
+### Docker Compose / Podman Compose
+
+Use:
+
+```text
+examples/compose.yaml
+```
+
+Copy the provided configuration example:
+
+```bash
+cp examples/.env.example examples/.env
+```
+
+Edit the configuration with the actual paths and profile ID.
+
+For a local development image, change the Compose image
+reference to:
+
+```yaml
+image: localhost/allos-mcp:secure-test
+```
+
+Then start:
+
+```bash
+podman compose \
+  --env-file examples/.env \
+  -f examples/compose.yaml \
+  up -d
+```
+
+The configuration publishes port 8765 on host loopback
+by default.
+
+To connect from another machine, explicitly configure
+`ALLOS_BIND_ADDRESS` for the intended host interface.
+
+The HTTPS certificate must match the address used by
+the remote MCP client.
+
+Never publish the MCP endpoint to untrusted networks
+without reviewing access controls and exposure.
+
+## Environment variables
+
+| Variable | Description |
+| --- | --- |
+| `ALLOS_DB_PATH` | Path to the Allos SQLite database |
+| `ALLOS_PROFILE_ID` | Profile ID accessible through the MCP instance |
+| `ALLOS_MCP_AUTH_TOKEN_FILE` | Bearer-token file for HTTPS |
+| `ALLOS_MCP_TLS_CERT_FILE` | TLS server certificate file |
+| `ALLOS_MCP_TLS_KEY_FILE` | TLS private key file |
+
+HTTP transport requires the three security file variables.
+
+STDIO transport does not require these HTTP settings.
+
+## Security model
+
+Allos MCP uses multiple independent protections:
+
+1. TLS protects data in transit.
+2. Bearer authentication controls HTTP access.
+3. Profile scoping limits database access.
+4. Table and column restrictions limit exposed information.
+5. SQLite connections are read-only.
+6. MCP clients cannot submit arbitrary SQL.
+
+These protections do not guarantee that retrieved health
+information remains private after it reaches an MCP client.
+
+Bearer tokens are shared secrets, not user identities.
+
+The server currently has no per-client roles, built-in
+token revocation API, audit trail or rate limiting.
+
+For additional details, see [SECURITY.md](SECURITY.md).
+
+## Limitations
+
+- Only reviewed database tables are supported.
+- Not all Allos health data categories are exposed.
+- Schema changes may affect compatibility.
+- A single MCP instance is scoped to one configured profile.
+- HTTP clients with the valid token can access the approved
+  data for that instance.
+- Direct SQLite access is independent of Allos application
+  sessions and application-level permissions.
+- The server does not provide medical advice.
+
+## Development and testing
+
+Install development dependencies:
+
+```bash
+python -m pip install -e '.[test]'
+```
+
+Run tests:
+
+```bash
+python -m pytest -q
+```
+
+Check Python syntax:
+
+```bash
+python -m compileall -q src/allos_mcp
+```
+
+The tests use synthetic SQLite data.
+
+The HTTPS tests generate short-lived test certificates
+and verify authenticated MCP initialization and tool calls.
+
+CI runs on Python 3.11, 3.12 and 3.13.
+
+## Repository and releases
+
+Forgejo is the primary Git repository.
+
+GitHub is used as a public mirror for source distribution,
+GitHub Actions and GHCR container publishing.
+
+The publishing workflow builds Linux AMD64 and ARM64 images.
+
+Development tags and stable release tags must be validated
+before publication.
 
 ## Roadmap
 
-- Validate additional Allos schema versions.
-- Add more synthetic compatibility and permission tests.
-- Evaluate authenticated HTTP access and audit logging.
-- Improve package distribution and release automation.
-
+- Improve schema compatibility across Allos releases.
+- Expand authorized read-only metric coverage.
+- Improve operational security and token rotation.
+- Evaluate an optional official Allos Device API backend.
+- Consider standards-based OAuth authorization if needed
+  for more complex client deployments.
 
 ## License
 
-Allos MCP is licensed under the GNU Affero General Public License
-version 3.0 only (AGPL-3.0-only).
+Allos MCP is licensed under
+**GNU Affero General Public License v3.0 only
+(AGPL-3.0-only)**.
 
-This project uses the same license as the upstream Allos application,
-but remains an independent, unofficial community integration.
+See [LICENSE](LICENSE).
 
-See [LICENSE](LICENSE) for the complete license text.
+Earlier releases may use different license terms.
+Consult the license associated with each release.
+
+This is an independent community project.
+Allos is developed separately by its maintainers.
+```
