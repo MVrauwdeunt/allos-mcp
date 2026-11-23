@@ -19,6 +19,7 @@ services:
     volumes:
       # SQLite data, including WAL and SHM files.
       - "${ALLOS_DATA_DIR:?Set ALLOS_DATA_DIR}:/data:ro"
+
       # Authentication token and TLS files.
       - "${ALLOS_SECRETS_DIR:?Set ALLOS_SECRETS_DIR}:/run/secrets:ro"
 
