@@ -9,6 +9,7 @@ services:
     environment:
       ALLOS_DB_PATH: /data/allos.db
       ALLOS_PROFILE_ID: "${ALLOS_PROFILE_ID:?Set ALLOS_PROFILE_ID}"
+
       ALLOS_MCP_AUTH_TOKEN_FILE: /run/secrets/token
       ALLOS_MCP_TLS_CERT_FILE: /run/secrets/server.crt
       ALLOS_MCP_TLS_KEY_FILE: /run/secrets/server.key
