@@ -83,6 +83,8 @@ through this integration.
 ### Table and field restrictions
 
 Only reviewed tables and fields can be returned.
+New fields, including fields added to an already reviewed table, are hidden
+until explicitly listed in the exposure policy.
 
 Credential tables and unrestricted SQL queries are not exposed.
 
