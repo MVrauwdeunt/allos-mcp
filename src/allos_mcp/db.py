@@ -7,8 +7,13 @@ from urllib.parse import quote
 
 from .fields import READABLE_FIELDS
 
-DATE_COLUMNS = ("date", "ts", "occurred_at", "started_at", "start_time", "logged_at", "created_at")
+DATE_COLUMNS = (
+    "date", "ts", "occurred_at", "started_at", "start_time", "logged_at",
+    "recorded_at", "created_at",
+)
 MAX_TREND_DAYS = 366
+REQUIRED_METRIC_FIELDS = frozenset({"profile_id", "metric", "date", "value"})
+BUILTIN_SUBSTANCES = ("alcohol", "nicotine", "cannabis")
 
 
 class AllosDB:
@@ -30,7 +35,12 @@ class AllosDB:
 
     def validate(self):
         with closing(self.connect()) as conn:
-            conn.execute("SELECT name FROM main.sqlite_schema LIMIT 1").fetchone()
+            missing = REQUIRED_METRIC_FIELDS - self._table_info(conn, "metric_samples").keys()
+            if missing:
+                raise ValueError(
+                    "Unsupported Allos schema: metric_samples requires "
+                    + ", ".join(sorted(missing))
+                )
 
     @staticmethod
     def _table_info(conn, table) -> dict[str, int]:
@@ -51,11 +61,17 @@ class AllosDB:
             result = []
             for table, reviewed in sorted(READABLE_FIELDS.items()):
                 allowed = reviewed & self._table_info(conn, table).keys()
-                if "profile_id" not in allowed or len(allowed) < 2:
+                if not self._readable(table, allowed):
                     continue
                 result.append({"table": table, "fields": sorted(allowed),
                                "date_field": next((x for x in DATE_COLUMNS if x in allowed), None)})
             return result
+
+    @staticmethod
+    def _readable(table, allowed):
+        if table == "substance_daily_totals":
+            return {"profile_id", "substance", "units"} <= allowed
+        return "profile_id" in allowed and len(allowed) >= 2
 
     def query(self, table: str, *, fields=None, start=None, end=None, limit=50, offset=0):
         if table not in READABLE_FIELDS:
@@ -72,7 +88,7 @@ class AllosDB:
             allowed = READABLE_FIELDS[table] & info.keys()
             if "profile_id" not in allowed:
                 raise ValueError("Table is missing or not profile-scoped")
-            if len(allowed) < 2:
+            if not self._readable(table, allowed):
                 raise ValueError("Table has no supported data fields")
             selected = list(fields) if fields is not None else sorted(allowed)
             if not selected or len(selected) > 40 or any(f not in allowed for f in selected):
@@ -83,6 +99,10 @@ class AllosDB:
             # date(timestamp) handles ISO timestamps; dates are parameterized.
             clauses = ['"profile_id" = ?']
             params: list[int | str] = [self.profile_id]
+            if table == "substance_daily_totals":
+                # Custom keys may contain personal labels; only expose built-in categories.
+                clauses.append('"substance" COLLATE BINARY IN (?, ?, ?)')
+                params.extend(BUILTIN_SUBSTANCES)
             if start:
                 clauses.append(f'date("{date_col}") >= date(?)')
                 params.append(start)
@@ -93,12 +113,12 @@ class AllosDB:
             where_sql = " AND ".join(clauses)
             pk_fields = sorted((c for c in info if info[c]), key=info.__getitem__)
             order = [f'"{date_col}" DESC'] if date_col else []
-            # Prefer a reviewed primary key. Otherwise sort the projected
-            # values: rows that tie then return the same data to the client.
+            # Prefer a reviewed primary key. Break any remaining ties using
+            # all reviewed values, independently of the requested projection.
             sort_fields = pk_fields if pk_fields and set(pk_fields) <= allowed else []
-            sort_fields += sorted(set(selected) - set(sort_fields))
+            sort_fields += sorted(allowed - set(sort_fields))
             order.extend(f'"{c}" COLLATE BINARY' for c in sort_fields)
-            order.extend(f'typeof("{c}")' for c in sorted(set(selected)))
+            order.extend(f'typeof("{c}")' for c in sort_fields)
             order_sql = ", ".join(order)
             sql = (f'SELECT {col_sql} FROM main."{table}" WHERE {where_sql} '
                    f'ORDER BY {order_sql} LIMIT ? OFFSET ?')
@@ -125,7 +145,7 @@ class AllosDB:
             raise ValueError(f"Trend range must not exceed {MAX_TREND_DAYS} days inclusive")
         with closing(self.connect()) as conn:
             columns = READABLE_FIELDS['metric_samples'] & self._table_info(conn, "metric_samples").keys()
-            if not {"profile_id", "metric", "date", "value"} <= columns:
+            if not REQUIRED_METRIC_FIELDS <= columns:
                 raise ValueError("Metric sample schema not supported")
             return [dict(r) for r in conn.execute(
                 'SELECT date(date) AS date, COUNT(*) AS samples, ROUND(AVG(value), 3) AS average, '
