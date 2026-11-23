@@ -51,6 +51,10 @@ queried.
 
 Clients cannot submit arbitrary SQL statements.
 
+Only explicitly listed fields are readable. New schema fields are hidden by
+default, so some fields available in older MCP releases may no longer appear.
+`allos_metric_trend` accepts ranges of up to 366 days inclusive.
+
 The MCP server does not provide write operations.
 
 ## Requirements
@@ -243,13 +247,12 @@ Image tags:
 
 - `edge`: latest successfully published development image.
 - `0.1.2`: previous stable release.
-- `0.2.0`: secure release, once published.
+- `0.2.0`: stable release used by the Compose example by default.
 - `sha-*`: images associated with specific commits.
 
 ### Build locally
 
-Before the secure version is released, build from the
-development branch:
+To test changes locally, build from your working tree:
 
 ```bash
 podman build \
