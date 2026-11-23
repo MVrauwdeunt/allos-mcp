@@ -4,16 +4,17 @@
 import argparse
 import hmac
 import os
+import sqlite3
 import ssl
 
 from functools import lru_cache
-from importlib.metadata import version
 from pathlib import Path
 
 import uvicorn
 from mcp.server.fastmcp import FastMCP
 from starlette.types import ASGIApp, Receive, Scope, Send
 
+from . import __version__
 from .db import AllosDB
 
 
@@ -25,7 +26,7 @@ mcp = FastMCP(
 )
 
 # Report the actual installed package version to MCP clients.
-mcp._mcp_server.version = version("allos-mcp")
+mcp._mcp_server.version = __version__
 
 
 @lru_cache(maxsize=1)
@@ -75,7 +76,7 @@ def allos_metric_trend(
     start: str,
     end: str,
 ) -> list[dict]:
-    """Calculate daily minimum, maximum and average metric values."""
+    """Calculate daily minimum, maximum and average for up to 366 days inclusive."""
     return database().trend(metric, start, end)
 
 
@@ -278,9 +279,8 @@ def main() -> None:
         parser.error("ALLOS_PROFILE_ID is required")
 
     try:
-        int(profile_id)
-        database()
-    except (ValueError, OSError) as exc:
+        database().validate()
+    except (ValueError, OSError, sqlite3.Error) as exc:
         parser.error(
             f"Invalid Allos database configuration: {exc}"
         )
