@@ -1,3 +1,5 @@
+
+# Python
 .venv/
 __pycache__/
 .pytest_cache/
@@ -5,24 +7,34 @@ __pycache__/
 *.egg-info/
 build/
 dist/
-.env
-*.db
-*.db-wal
-*.db-shm
-*.sqlite*
-secrets.yaml
 
-# Local test data and credentials
-testdata/
+# Local environment
 .env
 .env.*
 !.env.example
+!**/.env.example
+
+# Local development credentials
+.local/
+secrets/
+*.key
+*.pem
+*.p12
+*.pfx
+secrets.yaml
+
+# Local databases
 *.db
 *.db-wal
 *.db-shm
 *.sqlite
 *.sqlite3
-*.pem
-*.key
-auth.json
-.venv/
+*.sqlite-wal
+*.sqlite-shm
+*.sqlite3-wal
+*.sqlite3-shm
+
+# Editor and operating system
+.DS_Store
+.idea/
+.vscode/

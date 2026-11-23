@@ -1,223 +1,309 @@
+
 # Security Policy
 
-Allos MCP is an independent, experimental, read-only Model Context Protocol (MCP) server for the self-hosted [Allos](https://github.com/FloorLamp/allos) personal health application.
+Allos MCP is an independent, experimental, read-only
+Model Context Protocol (MCP) server for the self-hosted
+Allos personal health application.
 
-Security and privacy are important because this project provides access to potentially sensitive personal health information.
+The project may provide access to sensitive personal
+health information.
 
-This document describes the project's security model, known limitations, recommended deployment practices, and vulnerability reporting process.
+This policy describes supported versions, security
+controls, deployment recommendations, known limitations
+and vulnerability reporting.
 
 ## Supported Versions
 
-Security fixes are provided on a best-effort basis.
+Security updates are provided on a best-effort basis.
 
-| Version | Security support |
+| Version | Support |
 | --- | --- |
-| Latest release | ✅ Best-effort security updates |
-| `edge` / `main` | Development branch, not guaranteed stable |
-| Older releases | ❌ No guaranteed security updates |
+| Latest stable release | Best-effort security fixes |
+| `main` / `edge` | Development, no stability guarantee |
+| Older releases | No guaranteed security fixes |
 
-Users are encouraged to use the latest stable release and review release notes before upgrading.
+Users should review release notes before upgrading.
 
-## Security Model
+The HTTPS and Bearer-token protections described below
+apply to the secure development version intended for v0.2.0.
 
-Allos MCP is designed around restricted, read-only access to an existing Allos SQLite database.
+Earlier releases, including v0.1.2, do not provide the
+same built-in HTTP security controls.
 
-### Implemented protections
+## Security Architecture
 
-- **Read-only SQLite access:** Database connections use SQLite read-only mode and `PRAGMA query_only=ON`.
-- **Explicit table restrictions:** Only reviewed database tables can be queried.
-- **Restricted fields:** Known sensitive columns are excluded from tool responses.
-- **Profile scoping:** Queries are restricted to an administrator-configured `ALLOS_PROFILE_ID`.
-- **No arbitrary SQL:** MCP clients cannot submit SQL statements directly.
-- **Input validation:** Query limits, pagination, dates, table names, and column selections are validated.
-- **Restricted HTTP binding:** Listening on non-loopback interfaces requires an explicit `--allow-nonloopback` override.
-- **Automated regression tests:** Tests cover profile isolation, read-only access, query validation, MCP protocol behavior, HTTP binding, and selected schema compatibility scenarios.
+The project provides two MCP transports.
 
-These measures reduce the risk of unintended access or modification. They do not guarantee complete protection against all vulnerabilities.
+### STDIO
 
-## Known Security Limitations
+STDIO is intended for local MCP clients launching the server
+as a subprocess.
 
-### No built-in HTTP authentication
+It does not expose an HTTP endpoint.
 
-Allos MCP currently does not provide:
+Access depends on operating system permissions and the
+security of the local client process.
 
-- HTTP authentication or API tokens.
-- Per-client authorization.
-- Request rate limiting.
-- Security audit logging.
-- Built-in TLS termination.
+### Streamable HTTP over HTTPS
 
-**Anyone who can reach the MCP HTTP endpoint may be able to query the health data available to that server instance.**
+The secure HTTP transport requires:
 
-The `--allow-nonloopback` option is not an authentication mechanism. It only permits the server to bind to an address other than loopback.
+- TLS server certificate.
+- TLS private key.
+- Bearer authentication token.
+- Explicit server configuration.
 
-Never expose the MCP endpoint directly to the public internet or untrusted networks.
+The HTTP server refuses to start when these required
+security settings are missing.
 
-### Profile ID is not authentication
+Authentication is checked before requests enter the
+MCP protocol handler.
 
-`ALLOS_PROFILE_ID` selects the Allos profile accessible to an MCP server instance.
+All HTTP requests, including follow-up requests within
+an MCP session, require authorization.
 
-It is not an authentication credential and does not provide per-client access control.
+A missing, malformed or incorrect token is rejected
+with HTTP 401.
 
-All clients connected to the same instance can potentially access the same approved data.
+The server uses the existing Python/Uvicorn HTTP implementation
+with native TLS support.
 
-### Read-only does not mean confidential
+A reverse proxy or separate authentication service
+is not required.
 
-Read-only operation prevents the MCP integration from modifying the database.
+## Implemented Protections
 
-It does not prevent connected clients from retrieving or disclosing approved health data.
+### Read-only SQLite access
 
-An AI assistant may forward retrieved measurements to its configured AI provider.
+The Allos database is opened in read-only mode.
 
-Users are responsible for understanding the privacy policies and data-handling practices of their MCP clients and model providers.
+SQLite query-only restrictions prevent modification
+through this integration.
 
-### Direct SQLite access
+### Table and field restrictions
 
-Allos MCP accesses the SQLite database directly rather than using Allos' application-level authorization or HTTP API.
+Only reviewed tables and fields can be returned.
 
-As a result:
+Credential tables and unrestricted SQL queries are not exposed.
 
-- Allos' normal authentication does not protect the MCP endpoint.
-- Database schema changes may affect compatibility.
-- Profile isolation relies on the MCP implementation.
-- Filesystem permissions are an important security boundary.
+### Profile isolation
 
-The current field filtering is not a guarantee that every sensitive column introduced by a future Allos schema change will automatically be excluded.
+Every supported query is restricted to the configured
+`ALLOS_PROFILE_ID`.
+
+The profile ID is an administrative configuration value,
+not a user credential.
+
+### Authentication
+
+HTTP requests must provide a valid Bearer token.
+
+Tokens are read from a configured file and compared
+using constant-time comparison.
+
+A valid token authorizes access to the instance,
+not to individual tools or data categories.
+
+### Transport encryption
+
+HTTP transport uses TLS.
+
+The server can be configured directly with a certificate
+and private key.
+
+Clients must verify the certificate and ensure its
+subjectAltName matches the destination.
+
+### Automated tests
+
+Regression tests cover:
+
+- Read-only database behavior.
+- Profile isolation.
+- Table and field restrictions.
+- Query validation.
+- SQL injection resistance within supported interfaces.
+- MCP protocol integration.
+- Bearer-token authentication.
+- HTTPS connectivity.
+- Rejection of untrusted certificates.
+- Rejection of plaintext HTTP.
+- Rejection of missing security configuration.
+
+Automated tests are not a formal security audit.
+
+## Known Limitations
+
+### Static Bearer tokens
+
+The current HTTP authentication mechanism uses a
+configured shared Bearer token.
+
+It does not implement:
+
+- OAuth authorization flows.
+- Per-user identities.
+- Per-client roles or permissions.
+- Automatic token expiration.
+- A token revocation API.
+- Rate limiting.
+- Comprehensive security audit logging.
+
+Anyone possessing the valid token and able to connect
+to the endpoint can potentially access the approved
+health data for that instance.
+
+To rotate the token, replace its secret file and
+restart the MCP process or container.
+
+### Direct database access
+
+Allos MCP reads the SQLite database directly.
+
+It does not use Allos' application-level authentication
+or session authorization.
+
+Database schema changes may affect compatibility.
+
+A future upstream schema change could introduce additional
+sensitive data requiring an allowlist review.
+
+### Read-only does not guarantee confidentiality
+
+Read-only database access prevents modification through MCP.
+
+It does not prevent an authorized MCP client from
+retrieving sensitive health records.
+
+Clients and AI providers may process, retain or transmit
+retrieved information according to their own policies.
+
+Only connect MCP clients you trust.
+
+### TLS protects transport, not endpoints
+
+TLS protects information during network transmission.
+
+It does not protect against:
+
+- A compromised MCP client.
+- A compromised server.
+- Stolen Bearer tokens.
+- Unauthorized filesystem access.
+- An AI provider retaining supplied health information.
 
 ## Recommended Deployment
 
-### 1. Keep HTTP access local
+### Protect secrets
 
-Bind the published container port to `127.0.0.1`:
+Store tokens and TLS private keys outside the source
+repository and container image.
 
-```bash
--p 127.0.0.1:8765:8765
-```
+Use restricted filesystem permissions.
 
-Inside a container, the MCP process may need to listen on `0.0.0.0` for port forwarding to work.
+Do not include secrets in:
 
-This does not mean the host port should be publicly exposed.
+- Git commits.
+- Container image layers.
+- Command-line arguments.
+- Logs.
+- Screenshots.
+- Public issue reports.
 
-For non-container installations, prefer:
+### Verify certificates
 
-```bash
-allos-mcp --transport http --host 127.0.0.1
-```
+Use certificates with valid subjectAltName entries.
 
-### 2. Use a trusted transport for remote clients
+Use a certificate authority trusted by the MCP client
+or explicitly configure the client to trust the intended
+self-signed certificate.
 
-For remote MCP access, prefer an authenticated SSH tunnel:
+Never disable TLS verification in production.
 
-```bash
-ssh -N -L 18765:127.0.0.1:8765 user@allos-server
-```
+### Restrict network exposure
 
-The MCP client can then connect to:
+Bind the service only to the interfaces required
+for the intended clients.
 
-```text
-http://127.0.0.1:18765/mcp
-```
+Use firewall restrictions where appropriate.
 
-SSH protects the network connection, but it does not provide per-MCP-client authorization. Processes able to access the forwarded local port may also reach the service.
+Bearer authentication is not a replacement for
+network access controls.
 
-Do not assume that a private network or VPN automatically provides sufficient application-level authorization.
+### Protect the database
 
-### 3. Mount the database read-only
+Mount the complete SQLite directory read-only.
 
-For container deployments:
+Restrict access to the service account.
 
-```bash
--v /path/to/allos-data:/data:ro
-```
+Avoid privileged containers.
 
-Mount the complete SQLite directory, including any WAL and SHM files.
+Do not make medical data world-readable to work around
+permission problems.
 
-The container process requires appropriate filesystem read permissions.
+Keep backups protected.
 
-Do not make the database world-readable to work around permission problems.
+### Keep dependencies updated
 
-Use a dedicated, minimally privileged account where practical.
+Apply security updates to the operating system,
+Python runtime, MCP SDK and container image.
 
-### 4. Protect the host and database
-
-- Apply operating system and container runtime security updates.
-- Restrict access to the Allos database directory.
-- Avoid privileged containers.
-- Avoid unnecessary host filesystem mounts.
-- Do not store credentials or personal health databases in the source repository.
-- Review dependency and image updates before deploying them.
-- Treat database backups as sensitive health information.
-
-### 5. Use trusted MCP clients
-
-Only connect clients you trust.
-
-Before connecting an AI assistant, consider whether the provider may store or process retrieved health information.
-
-If you do not want health data sent to a third-party AI service, use a client and model configuration that keeps processing within your trusted environment.
+Review upstream dependency changes before deployment.
 
 ## Reporting a Vulnerability
 
-**Please do not publicly disclose an unpatched security vulnerability in a GitHub Issue, Discussion, or Pull Request.**
+Please do not publicly disclose an unpatched vulnerability
+through a GitHub Issue, Discussion or Pull Request.
 
-Report security vulnerabilities privately through GitHub's security advisory system, if enabled:
+If private vulnerability reporting is enabled,
+use GitHub's security advisory interface:
 
-[Report a vulnerability](https://github.com/MVrauwdeunt/allos-mcp/security/advisories/new)
+https://github.com/MVrauwdeunt/allos-mcp/security/advisories/new
 
-If private vulnerability reporting is unavailable, open a public issue requesting a private contact method **without including vulnerability details, exploit code, or sensitive information**.
+If private reporting is unavailable, request a private
+contact method without publishing exploit details.
 
-When reporting a vulnerability, include where possible:
+When reporting an issue, include:
 
-- A description of the issue and its potential impact.
-- The affected Allos MCP version.
+- A description of the vulnerability.
+- The affected version.
 - Relevant deployment information.
 - Reproduction steps using synthetic data.
-- Relevant logs with secrets and health information removed.
+- Sanitized logs where necessary.
 
-Never submit real medical records, database files, credentials, or other personal information as part of a vulnerability report.
+Never submit real medical records, credentials,
+private keys or database backups.
 
 ## Disclosure and Response
 
 Security reports are handled on a best-effort basis.
 
-The maintainer will aim to:
+The maintainer will aim to review valid reports,
+reproduce issues, develop fixes and publish advisories
+when appropriate.
 
-1. Review and acknowledge valid reports.
-2. Reproduce the issue using synthetic test data.
-3. Assess the security impact.
-4. Develop and test an appropriate fix.
-5. Publish a security advisory or release where necessary.
-6. Credit the reporter when appropriate and agreed.
-
-No guaranteed response or remediation timeline is currently offered.
+No guaranteed response or remediation timeline
+is currently offered.
 
 Coordinated disclosure is appreciated.
 
-## Security Testing
-
-The project includes automated tests for:
-
-- SQLite read-only enforcement.
-- Profile isolation.
-- Sensitive field restrictions.
-- SQL injection resistance in supported query interfaces.
-- Date and pagination validation.
-- MCP tool discovery and invocation through STDIO.
-- HTTP loopback binding and initialization.
-- Selected database schema changes.
-
-These tests provide regression coverage but are not equivalent to an independent penetration test or formal security audit.
-
 ## Scope
 
-This policy covers vulnerabilities in the Allos MCP project itself.
+This policy covers Allos MCP itself.
 
-For vulnerabilities affecting the upstream Allos application, please consult the [Allos repository](https://github.com/FloorLamp/allos) and its security reporting instructions.
+Issues in the upstream Allos application should be
+reported through the upstream project's security process.
 
-Allos MCP is an independent community project and is not affiliated with or endorsed by the Allos maintainers.
+Allos MCP is an independent community project and is
+not officially affiliated with or endorsed by Allos.
 
 ## License
 
-Allos MCP's current development branch is licensed under **AGPL-3.0-only**.
+The current development branch is licensed under
+AGPL-3.0-only.
 
-Earlier published versions may use different license terms. Refer to the `LICENSE` file associated with the specific release.
+Earlier published versions may have different
+license terms.
+
+Refer to the LICENSE file in the relevant release.
+```

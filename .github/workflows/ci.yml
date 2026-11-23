@@ -17,7 +17,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.11", "3.12", "3.13"]
+        python-version:
+          - "3.11"
+          - "3.12"
+          - "3.13"
 
     steps:
       - name: Check out code
@@ -28,10 +31,16 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
+      - name: Check OpenSSL availability
+        run: openssl version
+
       - name: Install package and test dependencies
         run: python -m pip install -e '.[test]'
 
-      - name: Run tests
+      - name: Check Python syntax
+        run: python -m compileall -q src/allos_mcp
+
+      - name: Run complete test suite
         run: python -m pytest -q
 
   package:
@@ -64,5 +73,5 @@ jobs:
       - name: Check out code
         uses: actions/checkout@v4
 
-      - name: Build (no push, no secrets)
+      - name: Build container image
         run: docker build -f Containerfile -t allos-mcp:ci .
