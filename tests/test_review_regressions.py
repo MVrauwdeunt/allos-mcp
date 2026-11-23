@@ -69,3 +69,83 @@ def test_invalid_database_is_rejected_at_startup(tmp_path):
     )
     assert result.returncode == 2
     assert 'Invalid Allos database configuration' in result.stderr
+
+
+def test_body_metrics_supports_recorded_at(tmp_path):
+    path = tmp_path / 'body.db'
+    with sqlite3.connect(path) as conn:
+        conn.executescript('''
+            CREATE TABLE body_metrics (id INTEGER PRIMARY KEY, profile_id INTEGER,
+                                       recorded_at TEXT, weight_kg REAL);
+            INSERT INTO body_metrics VALUES (1, 1, '2026-11-01T08:00:00', 75),
+                                            (2, 1, '2026-11-02T08:00:00', 76),
+                                            (3, 2, '2026-11-02T08:00:00', 99);
+        ''')
+    db = AllosDB(str(path), 1)
+    assert db.catalog()[0]['date_field'] == 'recorded_at'
+    assert db.query('body_metrics', fields=['id', 'recorded_at'],
+                    start='2026-11-02', end='2026-11-02')['rows'] == [
+        {'id': 2, 'recorded_at': '2026-11-02T08:00:00'},
+    ]
+
+
+@pytest.mark.parametrize('schema', [
+    '',
+    'CREATE TABLE unrelated (id INTEGER)',
+    'CREATE TABLE metric_samples (profile_id INTEGER, metric TEXT, date TEXT)',
+    'CREATE VIEW metric_samples AS SELECT 1 AS profile_id, 2 AS metric, 3 AS date, 4 AS value',
+])
+def test_startup_rejects_unsupported_sqlite_schema(tmp_path, schema):
+    path = tmp_path / 'schema.db'
+    with sqlite3.connect(path) as conn:
+        conn.executescript(schema)
+    with pytest.raises(ValueError, match='Unsupported Allos schema: metric_samples requires'):
+        AllosDB(str(path), 1).validate()
+
+
+def test_startup_accepts_supported_schema_without_rows(tmp_path):
+    path = tmp_path / 'empty-metrics.db'
+    with sqlite3.connect(path) as conn:
+        conn.execute('CREATE TABLE metric_samples (profile_id INTEGER, metric TEXT, date TEXT, value REAL)')
+    db = AllosDB(str(path), 1)
+    db.validate()
+    assert db.metrics() == []
+
+
+def test_pagination_ties_do_not_depend_on_projection(tmp_path):
+    path = tmp_path / 'ties.db'
+    with sqlite3.connect(path) as conn:
+        conn.executescript('''
+            CREATE TABLE metric_samples (id INTEGER, profile_id INTEGER, date TEXT, metric TEXT, value REAL);
+            INSERT INTO metric_samples VALUES (1, 1, '2026-11-01', 'Z', 90),
+                                             (1, 1, '2026-11-01', 'a', 10),
+                                             (1, 1, '2026-11-01', 'Z', 90),
+                                             (1, 2, '2026-11-01', 'A', 99);
+            CREATE INDEX sample_values ON metric_samples(profile_id, value DESC);
+        ''')
+    db = AllosDB(str(path), 1)
+    for offset, expected in enumerate((90, 90, 10)):
+        full = db.query('metric_samples', limit=1, offset=offset)['rows']
+        projected = db.query('metric_samples', fields=['value'], limit=1, offset=offset)['rows']
+        assert projected == [{'value': full[0]['value']}] == [{'value': expected}]
+
+
+@pytest.mark.parametrize('table, definition, allowed, mine, other', [
+    ('food_daily_totals', 'group_key TEXT, servings REAL', ['group_key', 'servings'], "'fruit', 2", "'fruit', 9"),
+    ('protein_daily_totals', 'grams REAL', ['grams'], '20', '99'),
+    ('substance_daily_totals', 'substance TEXT COLLATE NOCASE, units INTEGER', ['substance', 'units'], "'alcohol', 1", "'alcohol', 9"),
+])
+def test_daily_totals_are_profile_scoped(tmp_path, table, definition, allowed, mine, other):
+    path = tmp_path / 'totals.db'
+    with sqlite3.connect(path) as conn:
+        conn.execute(f'CREATE TABLE {table} (id INTEGER, profile_id INTEGER, date TEXT, {definition}, notes TEXT)')
+        conn.execute(f"INSERT INTO {table} VALUES (1, 1, '2026-11-01', {mine}, 'private')")
+        conn.execute(f"INSERT INTO {table} VALUES (2, 2, '2026-11-01', {other}, 'private')")
+        if table == 'substance_daily_totals':
+            conn.execute(f"INSERT INTO {table} VALUES (3, 1, '2026-11-01', 'custom', 2, 'private')")
+            conn.execute(f"INSERT INTO {table} VALUES (4, 1, '2026-11-01', 'ALCOHOL', 3, 'private')")
+    db = AllosDB(str(path), 1)
+    assert set(db.catalog()[0]['fields']) == {'id', 'profile_id', 'date', *allowed}
+    assert db.query(table, fields=['id'], start='2026-11-01')['rows'] == [{'id': 1}]
+    with pytest.raises(ValueError, match='disallowed fields'):
+        db.query(table, fields=['notes'])
