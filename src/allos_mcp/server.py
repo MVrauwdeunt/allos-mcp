@@ -12,17 +12,38 @@ from pathlib import Path
 
 import uvicorn
 from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from . import __version__
 from .db import AllosDB
 
 
+# Explicit host allowlist for DNS rebinding protection.
+allowed_hosts = [
+    "localhost:*",
+    "127.0.0.1:*",
+    "[::1]:*",
+]
+
+allowed_hosts.extend(
+    host.strip()
+    for host in os.environ.get(
+        "ALLOS_MCP_ALLOWED_HOSTS", ""
+    ).split(",")
+    if host.strip()
+)
+
 mcp = FastMCP(
     "allos-mcp",
     json_response=True,
     host="127.0.0.1",
     port=8765,
+    transport_security=TransportSecuritySettings(
+        enable_dns_rebinding_protection=True,
+        allowed_hosts=allowed_hosts,
+        allowed_origins=[],
+    ),
 )
 
 # Report the actual installed package version to MCP clients.
