@@ -1,7 +1,7 @@
 
 services:
   allos-mcp:
-    image: ghcr.io/mvrauwdeunt/allos-mcp:${ALLOS_VERSION:-0.2.1}
+    image: ghcr.io/mvrauwdeunt/allos-mcp:${ALLOS_VERSION:-0.2.2}
     container_name: allos-mcp
 
     user: "${ALLOS_UID:-10001}:${ALLOS_GID:-10001}"
